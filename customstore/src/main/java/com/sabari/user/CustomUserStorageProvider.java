@@ -70,8 +70,8 @@ public class CustomUserStorageProvider implements UserStorageProvider,
         try (Session c = DbUtil.getSession(this.model)) {
             userModel = c.executeWrite(tx -> {
             var query 
-                = new Query("MATCH (u:User {userName: $userName}) RETURN u.userName as userName,u.firstName as firstName, u.lastName as lastName, u.email as email, u.birthDate as birthDate LIMIT 1;" , 
-                parameters("userName", username));
+                = new Query(CustomUserStorageProviderConstants.QUERY_GET_USER_INFO_BY_NAME,
+                parameters(CustomUserStorageProviderConstants.DB_KEY_USER_NAME, username));
             var result = tx.run(query).list();
             if (result.size() == 1){
                 return mapUser(realm, result.get(0));
@@ -93,8 +93,8 @@ public class CustomUserStorageProvider implements UserStorageProvider,
         try (Session c = DbUtil.getSession(this.model)) {
             userModel = c.executeWrite(tx -> {
             var query 
-                = new Query("MATCH (u:User {email: $email}) RETURN u.userName as userName,u.firstName as firstName, u.lastName as lastName, u.email as email, u.birthDate as birthDate LIMIT 1;" , 
-                parameters("email", email));
+                = new Query(CustomUserStorageProviderConstants.QUERY_GET_USER_INFO_BY_EMAIL , 
+                parameters(CustomUserStorageProviderConstants.DB_KEY_USER_EMAIL, email));
             var result = tx.run(query).list();
             if (result.size() == 1){
                 return mapUser(realm, result.get(0));
@@ -136,7 +136,7 @@ public class CustomUserStorageProvider implements UserStorageProvider,
         boolean isPasswordAuthentic = false;
         try (Session s = DbUtil.getSession(this.model)) {
             isPasswordAuthentic = s.executeWrite(tx -> {
-                var query = new Query("MATCH (user:User {firstName: $userName}) -[:HAS_PASSWORD]-> (password:Password) RETURN password.hash as password LIMIT 1" , parameters("userName", username));
+                var query = new Query(CustomUserStorageProviderConstants.QUERY_GET_PASSWORD_FOR_USER , parameters(CustomUserStorageProviderConstants.DB_KEY_USER_NAME, username));
                 var result = tx.run(query).list();
                 if (result.size() == 1){
                     String password = result.get(0).get("password").asString();
@@ -151,7 +151,6 @@ public class CustomUserStorageProvider implements UserStorageProvider,
        }
        log.info("isValid({})",isPasswordAuthentic);
        return isPasswordAuthentic;
-      
     }
 
     // UserQueryProvider implementation
@@ -162,10 +161,10 @@ public class CustomUserStorageProvider implements UserStorageProvider,
         try (Session c = DbUtil.getSession(this.model)) {
             count = c.executeWrite(tx -> {
             var query 
-                = new Query("Match (u:User) Return COUNT(u) as count;");
+                = new Query(CustomUserStorageProviderConstants.QUERY_GET_USER_COUNT);
             var result = tx.run(query).list();
             if (result.size() == 1){
-                return result.get(0).get("count").asInt();
+                return result.get(0).get(CustomUserStorageProviderConstants.DB_KEY_USER_COUNT).asInt();
             }
             return 0;
           });
@@ -191,8 +190,8 @@ public class CustomUserStorageProvider implements UserStorageProvider,
                 if (firstResult > 0) {
                     skipRecords = firstResult - 1;
                 };
-                var query = new Query("Match (u:User) Return u.userName as userName,u.firstName as firstName, u.lastName as lastName, u.email as email, u.birthDate as birthDate ORDER BY u.userName SKIP $skip LIMIT $maxResults;"
-                    , parameters("skip", skipRecords, "maxResults", maxResults));
+                var query = new Query(CustomUserStorageProviderConstants.QUERY_GET_USER_STREAM_WITH_OFFSET_MAXRECORDS
+                    , parameters(CustomUserStorageProviderConstants.RECORD_SKIP_KEY, skipRecords, CustomUserStorageProviderConstants.RECORD_LIMIT_KEY, maxResults));
                 var result = tx.run(query);
                 for (var user: result.list() )
                 {
@@ -220,11 +219,19 @@ public class CustomUserStorageProvider implements UserStorageProvider,
                 if (firstResult > 0) {
                     skipRecords = firstResult - 1;
                 };
-                 var query = new Query("Match (u:User) where u.userName CONTAINS $userName Return u.userName as userName,u.firstName as firstName, u.lastName as lastName, u.email as email, u.birthDate as birthDate ORDER BY u.userName SKIP $skip LIMIT $maxResults;"
-                    , parameters("userName", search,"skip",skipRecords, "maxResults", maxResults));
+                String neo4jCompatibleSearchValue;
+                if (search.equals(CustomUserStorageProviderConstants.WILDCARD)) {
+                    neo4jCompatibleSearchValue = CustomUserStorageProviderConstants.EMPTY_STRING;
+                } else {
+                    neo4jCompatibleSearchValue = search;
+                }
+                log.info("user-record {} skip: {}, maxResults: {}", neo4jCompatibleSearchValue, skipRecords, maxResults);
+                var query = new Query(CustomUserStorageProviderConstants.QUERY_SEARCH_USER_STREAM_WITH_OFFSET_MAXRECORDS
+                    , parameters(CustomUserStorageProviderConstants.DB_KEY_USER_NAME, neo4jCompatibleSearchValue,CustomUserStorageProviderConstants.RECORD_SKIP_KEY,skipRecords, CustomUserStorageProviderConstants.RECORD_LIMIT_KEY, maxResults));
                 var result = tx.run(query);
                 for (var user: result.list() )
                 {
+                    log.info("retrieved user stream: {}", user);
                     users.add(mapUser(realm,user));
                 };
                 return null;
@@ -252,7 +259,7 @@ public class CustomUserStorageProvider implements UserStorageProvider,
     public UserModel addUser(RealmModel realm, String username) {
         try (Session s = DbUtil.getSession(this.model)) {
             var txReturn = s.executeWrite(tx -> {
-                var query = new Query("CREATE (:User {username: $userName });" , parameters("userName", username));
+                var query = new Query(CustomUserStorageProviderConstants.QUERY_CREATE_USER , parameters(CustomUserStorageProviderConstants.DB_KEY_USER_NAME, username));
                 tx.run(query).list();
                 return null;
             });
@@ -271,7 +278,7 @@ public class CustomUserStorageProvider implements UserStorageProvider,
         String userName = user.getUsername();
         try (Session s = DbUtil.getSession(this.model)) {
             var txReturn = s.executeWrite(tx -> {
-                var query = new Query("MATCH (u:User {userName: $userName}) DETACH DELETE u;" , parameters("userName", userName));
+                var query = new Query(CustomUserStorageProviderConstants.QUERY_DELETE_USER , parameters(CustomUserStorageProviderConstants.DB_KEY_USER_NAME, userName));
                 tx.run(query).list();
                 return null;
             });
@@ -281,21 +288,21 @@ public class CustomUserStorageProvider implements UserStorageProvider,
            throw new RuntimeException("Database error: unable to remove user",ex);
         }
         log.info("removeUser: realm={}; user = {}", realm.getName(), userName );
-        return false;
+        return true;
     }
     private UserModel mapUser(RealmModel realm, MapAccessor rs)  {
         
-        DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+        DateFormat dateFormat = new SimpleDateFormat(CustomUserStorageProviderConstants.DB_KEY_BIRTH_DATE_FORMAT);
         Date date;
         try {
-            date = dateFormat.parse(rs.get("birthDate").asString());
+            date = dateFormat.parse(rs.get(CustomUserStorageProviderConstants.DB_KEY_USER_BIRTHDATE).asString());
         } catch (ParseException e) {
            return null;
         }
-        CustomUser user = new CustomUser.Builder(ksession, realm, model, rs.get("userName").asString())
-          .email(rs.get("email").asString())
-          .firstName(rs.get("firstName").asString())
-          .lastName(rs.get("lastName").asString())
+        CustomUser user = new CustomUser.Builder(ksession, realm, model, rs.get(CustomUserStorageProviderConstants.DB_KEY_USER_NAME).asString())
+          .email(rs.get(CustomUserStorageProviderConstants.DB_KEY_USER_EMAIL).asString())
+          .firstName(rs.get(CustomUserStorageProviderConstants.DB_KEY_USER_FIRST_NAME).asString())
+          .lastName(rs.get(CustomUserStorageProviderConstants.DB_KEY_USER_LAST_NAME).asString())
           .birthDate(date)
           .build();
         

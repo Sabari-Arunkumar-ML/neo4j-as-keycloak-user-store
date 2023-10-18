@@ -66,7 +66,6 @@ public class CustomUserStorageProviderFactory implements UserStorageProviderFact
 
     @Override
     public CustomUserStorageProvider create(KeycloakSession ksession, ComponentModel model) {
-        log.info("creating new CustomUserStorageProvider");
         return new CustomUserStorageProvider(ksession,model);
     }
 
