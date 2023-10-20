@@ -22,10 +22,48 @@
       <artifactId>keycloak-services</artifactId>
       <version>${keycloak.version}</version>
     </dependency>
-
     <dependency>
       <groupId>org.keycloak</groupId>
-      <artifactId>keycloak-model-legacy</artifactId>
+      <artifactId>keycloak-server-spi</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-events-api</artifactId>
+      <version>1.8.1.Final</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-server-spi-private</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+  </dependency>
+    <!-- <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-core</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+        <groupId>org.keycloak</groupId>
+        <artifactId>keycloak-server-spi</artifactId>
+        <scope>provided</scope>
+    </dependency>
+    <dependency>
+        <groupId>org.keycloak</groupId>
+        <artifactId>keycloak-server-spi-private</artifactId>
+        <scope>provided</scope>
+    </dependency>
+    <dependency>
+        <groupId>org.keycloak</groupId>
+        <artifactId>keycloak-model-legacy-private</artifactId>
+        <scope>provided</scope>
+    </dependency> -->
+    
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-model-legacy-private</artifactId>
       <version>${keycloak.version}</version>
     </dependency>
 
@@ -79,7 +117,7 @@
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <java.version>17</java.version>
-    <keycloak.version> 20.0.5</keycloak.version>
+    <keycloak.version> 22.0.4</keycloak.version>
     <!-- <infinispan.version>14.0.6.Final</infinispan.version> -->
   </properties>
 

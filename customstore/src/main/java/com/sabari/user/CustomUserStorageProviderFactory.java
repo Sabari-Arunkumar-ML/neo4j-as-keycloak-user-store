@@ -22,7 +22,6 @@ public class CustomUserStorageProviderFactory implements UserStorageProviderFact
     protected final List<ProviderConfigProperty> configMetadata;
     
     public CustomUserStorageProviderFactory() {
-        log.info("[I24] CustomUserStorageProviderFactory created");
         
         
         // Create config metadata
@@ -71,8 +70,7 @@ public class CustomUserStorageProviderFactory implements UserStorageProviderFact
 
     @Override
     public String getId() {
-        log.info("getId()");
-        return "custom-neo4j-user-provider";
+        return CustomUserStorageProviderConstants.NEO4J_PROVIDER_ID;
     }
 
     
@@ -102,11 +100,9 @@ public class CustomUserStorageProviderFactory implements UserStorageProviderFact
 
     @Override
     public void onUpdate(KeycloakSession session, RealmModel realm, ComponentModel oldModel, ComponentModel newModel) {
-        log.info("onUpdate()" );
     }
 
     @Override
     public void onCreate(KeycloakSession session, RealmModel realm, ComponentModel model) {
-        log.info("onCreate()" );
     }
 }

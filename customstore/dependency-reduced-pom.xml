@@ -41,13 +41,31 @@
     <dependency>
       <groupId>org.keycloak</groupId>
       <artifactId>keycloak-services</artifactId>
-      <version>20.0.5</version>
+      <version>22.0.4</version>
       <scope>compile</scope>
     </dependency>
     <dependency>
       <groupId>org.keycloak</groupId>
-      <artifactId>keycloak-model-legacy</artifactId>
-      <version>20.0.5</version>
+      <artifactId>keycloak-server-spi</artifactId>
+      <version>22.0.4</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-events-api</artifactId>
+      <version>1.8.1.Final</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-server-spi-private</artifactId>
+      <version>22.0.4</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-model-legacy-private</artifactId>
+      <version>22.0.4</version>
       <scope>compile</scope>
     </dependency>
     <dependency>
@@ -65,7 +83,7 @@
   </dependencies>
   <properties>
     <java.version>17</java.version>
-    <keycloak.version>20.0.5</keycloak.version>
+    <keycloak.version>22.0.4</keycloak.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 </project>

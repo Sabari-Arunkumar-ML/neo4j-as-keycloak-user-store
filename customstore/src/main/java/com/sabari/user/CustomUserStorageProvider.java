@@ -15,13 +15,18 @@ import java.util.stream.Stream;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.credential.CredentialInput;
 import org.keycloak.credential.CredentialInputValidator;
+import org.keycloak.events.EventListenerProvider;
+import org.keycloak.events.admin.AdminEvent;
+import org.keycloak.events.admin.OperationType;
 import org.keycloak.models.GroupModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.RealmProvider;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.storage.StorageId;
 import org.keycloak.storage.UserStorageProvider;
+import org.keycloak.storage.UserStoragePrivateUtil;
 import org.keycloak.storage.user.UserLookupProvider;
 import org.keycloak.storage.user.UserQueryProvider;
 import org.keycloak.storage.user.UserRegistrationProvider;
@@ -30,7 +35,7 @@ import org.neo4j.driver.Session;
 import org.neo4j.driver.types.MapAccessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import org.keycloak.events.Event;
 
 import static org.neo4j.driver.Values.parameters;
 
@@ -41,34 +46,102 @@ public class CustomUserStorageProvider implements UserStorageProvider,
   UserLookupProvider, 
   CredentialInputValidator,
   UserRegistrationProvider,
-  UserQueryProvider {
+  UserQueryProvider,
+  EventListenerProvider  {
     
     private static final Logger log = LoggerFactory.getLogger(CustomUserStorageProvider.class);
-    private KeycloakSession ksession;
+    private KeycloakSession ksession;    
+    private KeycloakSession epksession;
     private ComponentModel model;
+    private RealmProvider realm;
 
+    public CustomUserStorageProvider(KeycloakSession ksession) {
+        this.epksession = ksession;
+        this.realm = epksession.realms();
+    }
     public CustomUserStorageProvider(KeycloakSession ksession, ComponentModel model) {
         this.ksession = ksession;
         this.model = model;
     }
 
     @Override
+    public void onEvent(Event event) {
+       
+    }
+
+    @Override
+    public void onEvent(AdminEvent event, boolean includeRepresentation) {
+        // nothing to do
+        this.model = null;
+        OperationType opsType =  event.getOperationType();
+        if ((opsType.name() == CustomUserStorageProviderConstants.KC_EVENT_CREATE ) && (event.getResourcePath().contains(CustomUserStorageProviderConstants.KC_RESOURCE_PATH_USER_SUFFIX))){
+            String userID = event.getResourcePath().replaceFirst(CustomUserStorageProviderConstants.KC_RESOURCE_PATH_USER_SUFFIX, CustomUserStorageProviderConstants.EMPTY_STRING);
+            RealmModel realm = this.realm.getRealm(event.getRealmId());
+            var componentStream = realm.getComponentsStream();
+             for (var component : componentStream.toList()) {
+                if (component.getProviderId().equals(CustomUserStorageProviderConstants.NEO4J_PROVIDER_ID)) {
+                    this.model = component;
+                }
+            }
+
+            UserModel newRegisteredLocalUser = this.epksession.users().getUserById(realm,  userID);
+            if (newRegisteredLocalUser!= null) {
+                if (getUserByUsername(realm,newRegisteredLocalUser.getUsername()) == null) {
+                    log.info("User {} will be registered with neo4j", newRegisteredLocalUser.getUsername());
+                    try (Session s = DbUtil.getSession(this.model)) {
+                        var txReturn = s.executeWrite(tx -> {
+                            var query = new Query(CustomUserStorageProviderConstants.QUERY_CREATE_USER , parameters(
+                                CustomUserStorageProviderConstants.DB_KEY_USER_FIRST_NAME, newRegisteredLocalUser.getFirstName(),
+                                CustomUserStorageProviderConstants.DB_KEY_USER_LAST_NAME, newRegisteredLocalUser.getLastName(),
+                                CustomUserStorageProviderConstants.DB_KEY_USER_EMAIL, newRegisteredLocalUser.getEmail(),
+                                CustomUserStorageProviderConstants.DB_KEY_USER_NAME, newRegisteredLocalUser.getUsername()));
+                            tx.run(query).list();
+                            return null;
+                        });
+                    }
+                    catch(Exception ex) {
+                        log.warn("Database error: error in  create user {} in neo4j;  ex={}", newRegisteredLocalUser.getUsername(), ex.getMessage());
+                    }
+                } else {
+                    log.info("User {} is already registered with neo4j", newRegisteredLocalUser.getUsername());
+                }
+
+            } else {
+                log.info("User {} not found in keycloak database");
+            }
+        }
+        
+    }
+
+    @Override
     public void close() {
-        log.info("close()");
     }
 
     @Override
     public UserModel getUserById(RealmModel realm, String id) {
-        log.info("getUserById({})",id);
         StorageId sid = new StorageId(id);
         return getUserByUsername(realm, sid.getExternalId());
     }
 
+    // protected void importUserToKeycloak(RealmModel realm, UserModel neo4jUser) {
+
+    //     log.debug("Creating user %s with username: {}, email: {} to local Keycloak storage", neo4jUser.getUsername(),  neo4jUser.getEmail());
+    //     // kcUser => keyCloakUser
+    //     UserModel kcUser = UserStoragePrivateUtil.userLocalStorage(ksession).addUser(realm, neo4jUser.getUsername());
+    //     kcUser.setEnabled(true);
+    //     kcUser.setEmail(neo4jUser.getEmail());
+    //     kcUser.setFederationLink(model.getId());
+    //     kcUser.setFirstName(neo4jUser.getFirstName());        
+    //     kcUser.setLastName(neo4jUser.getLastName());
+    //     kcUser.setSingleAttribute(CustomUserStorageProviderConstants.ATTRIBUTE_USER_SOURCE_KEY, CustomUserStorageProviderConstants.ATTRIBUTE_USER_SOURCE_VALUE);
+    // }
+
+
     @Override
     public UserModel getUserByUsername(RealmModel realm, String username) {
-        UserModel userModel;
+        UserModel neo4jUser;
         try (Session c = DbUtil.getSession(this.model)) {
-            userModel = c.executeWrite(tx -> {
+            neo4jUser = c.executeWrite(tx -> {
             var query 
                 = new Query(CustomUserStorageProviderConstants.QUERY_GET_USER_INFO_BY_NAME,
                 parameters(CustomUserStorageProviderConstants.DB_KEY_USER_NAME, username));
@@ -78,20 +151,24 @@ public class CustomUserStorageProvider implements UserStorageProvider,
             }
             return null;
           });
-       }
-       catch(Exception ex) {
-           log.warn("Database error: unable to fetch record by username; ex={}", ex.getMessage());
-           throw new RuntimeException("Database error: unable to fetch record by username",ex);
-       }
-       log.info("getUserByUsername({})",username);
-       return userModel;
+        }
+        catch(Exception ex) {
+            log.warn("Database error: unable to fetch record by username; ex={}", ex.getMessage());
+            throw new RuntimeException("Database error: unable to fetch record by username",ex);
+        }
+        
+        // UserModel kcUser = UserStoragePrivateUtil.userLocalStorage(ksession).getUserByUsername(realm, username);
+        // if (kcUser == null) {
+        //     importUserToKeycloak(realm, neo4jUser);
+        // }
+       return neo4jUser;
     }
 
     @Override
     public UserModel getUserByEmail(RealmModel realm, String email) {
-        UserModel userModel;
+        UserModel neo4jUser;
         try (Session c = DbUtil.getSession(this.model)) {
-            userModel = c.executeWrite(tx -> {
+            neo4jUser = c.executeWrite(tx -> {
             var query 
                 = new Query(CustomUserStorageProviderConstants.QUERY_GET_USER_INFO_BY_EMAIL , 
                 parameters(CustomUserStorageProviderConstants.DB_KEY_USER_EMAIL, email));
@@ -101,13 +178,16 @@ public class CustomUserStorageProvider implements UserStorageProvider,
             }
             return null;
           });
-       }
-       catch(Exception ex) {
-           log.warn("Database error: unable to fetch record by user-email: ex={}", ex.getMessage());
-           throw new RuntimeException("Database error: unable to fetch record by email",ex);
-       }
-       log.info("getUserByEmail({})",email);
-       return userModel;
+        }
+        catch(Exception ex) {
+            log.warn("Database error: unable to fetch record by user-email: ex={}", ex.getMessage());
+            throw new RuntimeException("Database error: unable to fetch record by email",ex);
+        }
+        // UserModel kcUser = UserStoragePrivateUtil.userLocalStorage(ksession).getUserByUsername(realm, neo4jUser.getUsername());
+        // if (kcUser == null) {
+        //     importUserToKeycloak(realm, neo4jUser);
+        // }
+        return neo4jUser;
     }
 
     @Override
@@ -126,7 +206,6 @@ public class CustomUserStorageProvider implements UserStorageProvider,
 
     @Override
     public boolean isValid(RealmModel realm, UserModel user, CredentialInput credentialInput) {
-        log.info("isValid(realm={},user={},credentialInput.type={})",realm.getName(), user.getUsername(), credentialInput.getType());
         if( !this.supportsCredentialType(credentialInput.getType())) {
             return false;
         }
@@ -149,7 +228,6 @@ public class CustomUserStorageProvider implements UserStorageProvider,
            log.warn("Database error: unable to validate password: ex={}", ex.getMessage());
            throw new RuntimeException("Database error: unable to validate password",ex);
        }
-       log.info("isValid({})",isPasswordAuthentic);
        return isPasswordAuthentic;
     }
 
@@ -173,7 +251,6 @@ public class CustomUserStorageProvider implements UserStorageProvider,
            log.warn("Database error: unable to get user count; ex={}", ex.getMessage());
            throw new RuntimeException("Database error: unable to get user count",ex);
         }
-        log.info("getUsersCount: realm={}; count = {}", realm.getName(),count );
         return count;
     }
 
@@ -195,6 +272,11 @@ public class CustomUserStorageProvider implements UserStorageProvider,
                 var result = tx.run(query);
                 for (var user: result.list() )
                 {
+                    // Skip listing user thats already added to keycloak
+                    UserModel kcUser = UserStoragePrivateUtil.userLocalStorage(ksession).getUserByUsername(realm, user.get(CustomUserStorageProviderConstants.DB_KEY_USER_NAME).asString());
+                    if (kcUser != null) {   
+                        continue;
+                    }
                     users.add(mapUser(realm,user));
                 };
                 return null;
@@ -231,6 +313,11 @@ public class CustomUserStorageProvider implements UserStorageProvider,
                 var result = tx.run(query);
                 for (var user: result.list() )
                 {
+                    // Skip listing user thats already added to keycloak
+                    UserModel kcUser = UserStoragePrivateUtil.userLocalStorage(ksession).getUserByUsername(realm, user.get(CustomUserStorageProviderConstants.DB_KEY_USER_NAME).asString());
+                    if (kcUser != null) {   
+                        continue;
+                    }
                     log.info("retrieved user stream: {}", user);
                     users.add(mapUser(realm,user));
                 };
@@ -257,20 +344,7 @@ public class CustomUserStorageProvider implements UserStorageProvider,
     // Need To explore user attributes addition, roles and credentials
     @Override
     public UserModel addUser(RealmModel realm, String username) {
-        try (Session s = DbUtil.getSession(this.model)) {
-            var txReturn = s.executeWrite(tx -> {
-                var query = new Query(CustomUserStorageProviderConstants.QUERY_CREATE_USER , parameters(CustomUserStorageProviderConstants.DB_KEY_USER_NAME, username));
-                tx.run(query).list();
-                return null;
-            });
-        }
-        catch(Exception ex) {
-           log.warn("Database error: unable to create user {};  ex={}", username, ex.getMessage());
-           throw new RuntimeException("Database error: unable to create user",ex);
-        }
-        log.info("addUser: realm={}; user = {}", realm.getName(), username );
-        CustomUser user = new CustomUser.Builder(ksession, realm, model,username).build();
-        return user;
+        return null;
     }
 
     @Override
@@ -287,7 +361,6 @@ public class CustomUserStorageProvider implements UserStorageProvider,
            log.warn("Database error: unable to remove user {};  ex={}", userName, ex.getMessage());
            throw new RuntimeException("Database error: unable to remove user",ex);
         }
-        log.info("removeUser: realm={}; user = {}", realm.getName(), userName );
         return true;
     }
     private UserModel mapUser(RealmModel realm, MapAccessor rs)  {
